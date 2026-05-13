@@ -1,4 +1,4 @@
-﻿# class-setup setup.ps1 — interactive installer for Windows.
+# class-setup setup.ps1 — interactive installer for Windows.
 # 各ステップで Y/N を聞きながら、授業用ツールと設定を入れる。
 # 副作用なしの状態確認は check.ps1 を使う。
 #

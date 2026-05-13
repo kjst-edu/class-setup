@@ -1,4 +1,4 @@
-﻿# class-setup check.ps1 — diagnostic only, no side effects.
+# class-setup check.ps1 — diagnostic only, no side effects.
 # Reports the install state of class tools, splitting required vs optional.
 # Run via:
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kjst-edu/class-setup/HEAD/check.ps1 | iex"
