@@ -5,24 +5,32 @@
 ## 使い方
 
 ### Mac
-ターミナルを開いて、次のコマンドを貼り付け:
+ターミナルを開いて、次のコマンドを貼り付け。
+
+1. チェック (何も変更しない):
 
 ```sh
-# 1. チェック (何も変更しない)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/kjst-edu/class-setup/HEAD/check.sh)"
+```
 
-# 2. セットアップ (各ステップで Y/N)
+2. セットアップ (各ステップで Y/N):
+
+```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/kjst-edu/class-setup/HEAD/setup.sh)"
 ```
 
 ### Windows
-PowerShell を開いて、次のコマンドを貼り付け:
+PowerShell を開いて、次のコマンドを貼り付け。
+
+1. チェック:
 
 ```pwsh
-# 1. チェック
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kjst-edu/class-setup/HEAD/check.ps1 | iex"
+```
 
-# 2. セットアップ
+2. セットアップ:
+
+```pwsh
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kjst-edu/class-setup/HEAD/setup.ps1 | iex"
 ```
 
