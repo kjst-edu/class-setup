@@ -152,7 +152,7 @@ if xcode-select -p >/dev/null 2>&1; then
   already_present
 elif ask "$ASK_PROMPT"; then
   printf "\n%sGUI のインストールダイアログが開きます。「インストール」をクリックしてください。%s\n" "$BOLD" "$RESET"
-  countdown 5
+  countdown 2
   xcode-select --install >/dev/null 2>&1 || true
   printf "  ダイアログ完了を待っています... (Ctrl+C で中断可)\n"
   waited=0

@@ -11,7 +11,6 @@
 # --- 状態 ---
 $script:RequiredSkipped  = New-Object System.Collections.ArrayList
 $script:OptionalSkipped  = New-Object System.Collections.ArrayList
-$script:UacWarningShown  = $false
 $script:Total            = 9
 $script:Current          = 0
 $script:WingetCache      = $null
@@ -56,31 +55,6 @@ function Read-YesNo {
     return $ans -match '^[yY]$'
 }
 
-function Invoke-Countdown {
-    param([int]$Seconds = 5)
-    Write-Host -NoNewline "  $Seconds 秒後に開始します..."
-    while ($Seconds -gt 0) {
-        Write-Host -NoNewline "  $Seconds"
-        Start-Sleep -Seconds 1
-        $Seconds--
-    }
-    Write-Host ""
-    Write-Host ""
-}
-
-function Show-UacWarning {
-    # 一度だけ表示。UAC を伴う最初の system-wide インストール直前に呼ぶ。
-    if ($script:UacWarningShown) { return }
-    Write-Host ""
-    Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host 'これから UAC ダイアログが何度か開きます' -ForegroundColor Yellow
-    Write-Host '"はい" を押してください' -ForegroundColor Yellow
-    Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host ""
-    Invoke-Countdown 5
-    $script:UacWarningShown = $true
-}
-
 function Show-LabelRequired {
     param([string]$Name)
     $script:Current++
@@ -116,7 +90,6 @@ function Add-OptionalSkipped {
 
 function Install-WingetPackage {
     # --scope user を先に試して UAC を回避。失敗時のみ system-wide にフォールバック。
-    # system-wide fallback の直前に Show-UacWarning (一度だけ表示)。
     param(
         [string]$Id,
         [string]$ProcessToStop = $null
@@ -139,7 +112,6 @@ function Install-WingetPackage {
         return $true
     }
 
-    Show-UacWarning
     Write-Host "  winget install (system) $Id ..." -ForegroundColor DarkGray
     & winget install --id $Id --exact `
         --accept-source-agreements --accept-package-agreements `
