@@ -6,7 +6,9 @@
 #   書込先はすべて pwsh 7 のもの (profile / VS Code default terminal) にハードコード。
 #   学生に pwsh 7 を日常使いさせるため (5.1 は UTF-8 パイプで文字化け)。
 
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# BOM 無し UTF-8。[Encoding]::UTF8 は BOM 付きを返すので使わない。
+$script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $script:Utf8NoBom
 
 # --- 状態 ---
 $script:RequiredSkipped  = New-Object System.Collections.ArrayList
@@ -125,6 +127,8 @@ function Install-WingetPackage {
 }
 
 function Set-FileBlock {
+    # Windows PowerShell 5.1 の Set-Content/Add-Content -Encoding UTF8 は BOM を書く。
+    # pwsh 7 profile を BOM 付きで書きたくないので [System.IO.File] 経由で BOM 無し固定。
     param([string]$Path, [string]$Begin, [string]$End, [string]$Body)
     $dir = Split-Path $Path
     if ($dir -and -not (Test-Path $dir)) {
@@ -132,16 +136,18 @@ function Set-FileBlock {
     }
     $new = "$Begin`r`n$Body`r`n$End"
     if (-not (Test-Path $Path)) {
-        Set-Content -Path $Path -Value $new -Encoding UTF8
+        [System.IO.File]::WriteAllText($Path, $new + "`r`n", $script:Utf8NoBom)
         return
     }
-    $content = Get-Content -Raw -Path $Path
+    # ReadAllText は BOM を自動判別して剥がす。読み込みは UTF-8 として扱う。
+    $content = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
     if ($content -match [regex]::Escape($Begin)) {
         $pattern = '(?s)' + [regex]::Escape($Begin) + '.*?' + [regex]::Escape($End)
         $content = [regex]::Replace($content, $pattern, $new)
-        Set-Content -Path $Path -Value $content -Encoding UTF8 -NoNewline
+        [System.IO.File]::WriteAllText($Path, $content, $script:Utf8NoBom)
     } else {
-        Add-Content -Path $Path -Value "`r`n$new" -Encoding UTF8
+        $sep = if ($content.Length -eq 0 -or $content.EndsWith("`n")) { '' } else { "`r`n" }
+        [System.IO.File]::WriteAllText($Path, $content + $sep + "`r`n" + $new + "`r`n", $script:Utf8NoBom)
     }
 }
 
@@ -156,24 +162,44 @@ function Set-VSCodeDefaultTerminal {
     }
 
     if (-not (Test-Path $settingsPath)) {
-        $content = "{`r`n    `"$key`": `"$value`"`r`n}"
-        Set-Content -Path $settingsPath -Value $content -Encoding UTF8
+        $content = "{`r`n    `"$key`": `"$value`"`r`n}`r`n"
+        [System.IO.File]::WriteAllText($settingsPath, $content, $script:Utf8NoBom)
         Write-Host "  作成しました: $settingsPath" -ForegroundColor Green
         return
     }
 
-    $raw = Get-Content -Raw -Path $settingsPath
+    $raw = [System.IO.File]::ReadAllText($settingsPath, [System.Text.Encoding]::UTF8)
     if ($raw -match [regex]::Escape("`"$key`"")) {
         Write-Host "  既に設定済み: $key" -ForegroundColor DarkGray
         return
     }
 
-    # JSONC コメント除去 → parse → 追加 → 書戻し
-    $stripped = $raw -replace '(?m)//[^\r\n]*', '' -replace '(?s)/\*.*?\*/', ''
+    # ConvertFrom/To-Json は JSONC コメントを破棄してしまうので、
+    # コメントがある可能性が高いファイルは触らず手動誘導する。
+    # 行頭の // と /* */ のみ検出 (文字列内 URL の // への誤マッチを避ける)。
+    $hasComments = ($raw -match '(?m)^\s*//') -or ($raw -match '/\*')
+    if ($hasComments) {
+        Write-Warning "settings.json にコメントが含まれているため、自動編集をスキップしました。"
+        Write-Host "  VS Code の設定 (Ctrl+,) → 右上 '...' → 'Open Settings (JSON)' で次の行を追加してください:" -ForegroundColor Yellow
+        Write-Host "    `"$key`": `"$value`"," -ForegroundColor Yellow
+        return
+    }
+
+    # コメントなし: parse-rewrite ではなく、最初の '{' 直後に1行挿入してフォーマットを保つ。
+    $idx = $raw.IndexOf('{')
+    if ($idx -lt 0) {
+        Write-Warning "settings.json に '{' が見つかりませんでした。手動で編集してください。"
+        return
+    }
+    $before = $raw.Substring(0, $idx + 1)
+    $after  = $raw.Substring($idx + 1)
+    $afterTrimmed = $after.TrimStart()
+    $needsComma = $afterTrimmed.Length -gt 0 -and -not $afterTrimmed.StartsWith('}')
+    $sep = if ($needsComma) { ",`r`n" } else { "`r`n" }
+    $insertion = "`r`n    `"$key`": `"$value`"$sep"
+    $newContent = $before + $insertion + $after
     try {
-        $obj = $stripped | ConvertFrom-Json
-        $obj | Add-Member -NotePropertyName $key -NotePropertyValue $value -Force
-        $obj | ConvertTo-Json -Depth 20 | Set-Content -Path $settingsPath -Encoding UTF8
+        [System.IO.File]::WriteAllText($settingsPath, $newContent, $script:Utf8NoBom)
         Write-Host "  追記しました: $key = '$value'" -ForegroundColor Green
     } catch {
         Write-Warning "settings.json を自動編集できませんでした ($_)。"
@@ -283,7 +309,9 @@ Show-LabelOptional "プロンプトのカスタマイズ (pwsh 7 profile に短�
 function Get-PromptState {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return 'missing' }
-    $content = Get-Content -Raw $Path -ErrorAction SilentlyContinue
+    try {
+        $content = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    } catch { return 'missing' }
     if (-not $content) { return 'missing' }
     if ($content -match '# >>> class-setup prompt >>>') { return 'ours' }
     $stripped = ($content -split "`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
@@ -293,7 +321,9 @@ function Get-PromptState {
     return 'missing'
 }
 
-$pwsh7Profile = Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'
+# OneDrive がドキュメントをリダイレクトしていると $HOME\Documents は実際の場所ではない。
+# GetFolderPath('MyDocuments') はリダイレクト後の実パスを返し、pwsh 7 の $PROFILE と一致する。
+$pwsh7Profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Microsoft.PowerShell_profile.ps1'
 switch (Get-PromptState $pwsh7Profile) {
     'ours' {
         Show-AlreadyPresent
@@ -329,7 +359,7 @@ function prompt {
 Show-LabelOptional "VS Code の既定ターミナルを pwsh 7 に" "VS Code ターミナルを毎回明示選択"
 $vscodeSettings = Join-Path $Env:APPDATA 'Code\User\settings.json'
 $alreadyVS = (Test-Path $vscodeSettings) -and `
-             ((Get-Content -Raw $vscodeSettings) -match '"terminal\.integrated\.defaultProfile\.windows"\s*:\s*"PowerShell"')
+             ([System.IO.File]::ReadAllText($vscodeSettings, [System.Text.Encoding]::UTF8) -match '"terminal\.integrated\.defaultProfile\.windows"\s*:\s*"PowerShell"')
 if ($alreadyVS) {
     Show-AlreadyPresent
 } elseif (Read-YesNo) {

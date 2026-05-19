@@ -5,7 +5,8 @@
 
 # Subprocess encoding: this script runs in a fresh `powershell -c` process,
 # so setting OutputEncoding does not leak back to the user's shell.
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# BOM 無し UTF-8 を使う ([Encoding]::UTF8 は BOM 付き)。
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $requiredMissing = New-Object System.Collections.ArrayList
 $optionalMissing = New-Object System.Collections.ArrayList
@@ -101,7 +102,9 @@ Show-Optional "PYTHONUTF8 = 1 (User)" "Python I/O が cp932 既定 / cross-platf
 function Get-PromptState {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return 'missing' }
-    $content = Get-Content -Raw $Path -ErrorAction SilentlyContinue
+    try {
+        $content = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    } catch { return 'missing' }
     if (-not $content) { return 'missing' }
     if ($content -match '# >>> class-setup prompt >>>') { return 'ours' }
     # コメント行を除外して既存プロンプト設定パターンを検索
@@ -112,7 +115,8 @@ function Get-PromptState {
     return 'missing'
 }
 
-$pwsh7Profile = Join-Path $HOME 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'
+# OneDrive リダイレクトを考慮し、pwsh 7 が実際に読む $PROFILE と同じ場所を見る。
+$pwsh7Profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Microsoft.PowerShell_profile.ps1'
 $promptName = 'プロンプトのカスタマイズ (pwsh 7 profile)'
 switch (Get-PromptState $pwsh7Profile) {
     'ours' {
@@ -138,7 +142,7 @@ switch (Get-PromptState $pwsh7Profile) {
 $vscodeSettings = Join-Path $Env:APPDATA 'Code\User\settings.json'
 Show-Optional "VS Code 既定ターミナル = pwsh 7" "VS Code ターミナルを毎回明示選択" {
     (Test-Path $vscodeSettings) -and `
-    ((Get-Content -Raw $vscodeSettings) -match '"terminal\.integrated\.defaultProfile\.windows"\s*:\s*"PowerShell"')
+    ([System.IO.File]::ReadAllText($vscodeSettings, [System.Text.Encoding]::UTF8) -match '"terminal\.integrated\.defaultProfile\.windows"\s*:\s*"PowerShell"')
 }
 
 Write-Host ""
