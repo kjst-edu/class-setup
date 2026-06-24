@@ -47,11 +47,12 @@ check_required "Xcode CLT (git)"      xcode-select -p
 check_required "uv"                   command -v uv
 check_required "GitHub CLI (gh)"      command -v gh
 check_required "Visual Studio Code"   test -d "/Applications/Visual Studio Code.app"
+check_required "~/.local/bin in PATH" sh -c 'case ":$PATH:" in *":$HOME/.local/bin:"*) exit 0;; *) exit 1;; esac'
 
 echo ""
 echo "${BOLD}[任意]${RESET}"
 check_optional "GitHub Desktop" \
-  "git CLI / VS Code Source Control のみで Git 操作" \
+  "git CLI / VS Code Source Control パネルのみで Git 操作" \
   test -d "/Applications/GitHub Desktop.app"
 prompt_state() {
   # echoes "ours" | "existing" | "missing"

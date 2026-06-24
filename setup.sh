@@ -18,7 +18,7 @@ fi
 
 REQUIRED_SKIPPED=()
 OPTIONAL_SKIPPED=()
-TOTAL=7
+TOTAL=8
 CURRENT=0
 
 ask() {
@@ -188,7 +188,22 @@ else
   skipped_required "uv"
 fi
 
-# --- 4. GitHub CLI ---
+# --- 4. ~/.local/bin を PATH に追加 ---
+label_required "~/.local/bin を PATH に追加 (uv tool install 先)"
+if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+  already_present
+elif ask "$ASK_PROMPT"; then
+  inject_block "$HOME/.zshrc" \
+    "# >>> class-setup path >>>" \
+    "# <<< class-setup path <<<" \
+    'export PATH="$HOME/.local/bin:$PATH"'
+  export PATH="$HOME/.local/bin:$PATH"
+  printf "  %s追記しました%s (~/.zshrc)\n" "$GREEN" "$RESET"
+else
+  skipped_required "~/.local/bin PATH"
+fi
+
+# --- 5. GitHub CLI ---
 label_required "GitHub CLI (gh コマンド)"
 if command -v gh >/dev/null 2>&1; then
   already_present
@@ -201,7 +216,7 @@ else
   skipped_required "gh"
 fi
 
-# --- 5. VS Code ---
+# --- 6. VS Code ---
 label_required "Visual Studio Code"
 if [ -d "/Applications/Visual Studio Code.app" ]; then
   already_present
@@ -214,7 +229,7 @@ else
   skipped_required "Visual Studio Code"
 fi
 
-# --- 6. GitHub Desktop ---
+# --- 7. GitHub Desktop ---
 label_optional "GitHub Desktop" \
   "git CLI / VS Code Source Control パネルのみで Git 操作"
 if [ -d "/Applications/GitHub Desktop.app" ]; then
@@ -228,7 +243,7 @@ else
   skipped_optional "GitHub Desktop"
 fi
 
-# --- 7. プロンプトのカスタマイズ ---
+# --- 8. プロンプトのカスタマイズ ---
 label_optional "プロンプトのカスタマイズ (~/.zshrc にプロンプトのカスタマイズを1ブロック追記)" \
   "既定の長いプロンプトのまま"
 

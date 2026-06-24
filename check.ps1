@@ -83,11 +83,17 @@ Write-Host ""
 Write-Host "Class setup status (Windows)" -ForegroundColor White
 Write-Host ""
 Write-Host "[必須]" -ForegroundColor White
-Show-Required "PowerShell 7"       { Test-CommandPresent 'pwsh' }
+Show-Required "PowerShell 7"       { (Test-CommandPresent 'pwsh') -or (Test-WingetInstalled 'Microsoft.PowerShell') }
 Show-Required "git"                { (Test-CommandPresent 'git')  -or (Test-WingetInstalled 'Git.Git') }
 Show-Required "GitHub CLI (gh)"    { (Test-CommandPresent 'gh')   -or (Test-WingetInstalled 'GitHub.cli') }
 Show-Required "uv"                 { (Test-CommandPresent 'uv')   -or (Test-WingetInstalled 'astral-sh.uv') }
 Show-Required "Visual Studio Code" { (Test-CommandPresent 'code') -or (Test-WingetInstalled 'Microsoft.VisualStudioCode') }
+Show-Required "~/.local/bin in PATH" {
+    $localBin = Join-Path $HOME '.local\bin'
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    ($Env:Path -split ';' | Where-Object { $_ -eq $localBin }).Count -gt 0 -or
+    ($userPath -and ($userPath -split ';' | Where-Object { $_ -eq $localBin }).Count -gt 0)
+}
 
 Write-Host ""
 Write-Host "[任意]" -ForegroundColor White
@@ -95,7 +101,7 @@ Show-Optional "GitHub Desktop" "git CLI / VS Code Source Control パネルのみ
     (Test-Path (Join-Path $Env:LOCALAPPDATA 'GitHubDesktop\GitHubDesktop.exe')) -or `
     (Test-WingetInstalled 'GitHub.GitHubDesktop')
 }
-Show-Optional "PYTHONUTF8 = 1 (User)" "Python I/O が cp932 既定 / cross-platform 注意" {
+Show-Optional "PYTHONUTF8 = 1 (User)" "Python I/O が cp932 既定 / cross-platform で文字化けリスク" {
     [Environment]::GetEnvironmentVariable('PYTHONUTF8','User') -eq '1'
 }
 

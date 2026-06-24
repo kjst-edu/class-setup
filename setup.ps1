@@ -13,7 +13,7 @@ $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 # --- 状態 ---
 $script:RequiredSkipped  = New-Object System.Collections.ArrayList
 $script:OptionalSkipped  = New-Object System.Collections.ArrayList
-$script:Total            = 9
+$script:Total            = 10
 $script:Current          = 0
 $script:WingetCache      = $null
 
@@ -90,6 +90,58 @@ function Add-OptionalSkipped {
     Write-Host "  スキップしました" -ForegroundColor DarkGray
 }
 
+function Remove-Bom {
+    # UTF-8 BOM (EF BB BF) が付いていれば除去。なければ何もしない。
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $head = New-Object byte[] 3
+            $n = $fs.Read($head, 0, 3)
+            if (-not ($n -eq 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)) { return }
+        } finally { $fs.Dispose() }
+    } catch { return }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $stripped = New-Object byte[] ($bytes.Length - 3)
+    [Array]::Copy($bytes, 3, $stripped, 0, $stripped.Length)
+    [System.IO.File]::WriteAllBytes($Path, $stripped)
+}
+
+function Remove-StalePromptBlocks {
+    # 旧 setup.ps1 が $HOME\Documents\... や OneDrive パスに書いた prompt block を除去する。
+    # 正しいパス ($pwsh7Profile) と異なる場所にある our block を自動削除。
+    param([string]$CorrectPath)
+    $profileRel = 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1'
+    $blockBegin = '# >>> class-setup prompt >>>'
+    $blockEnd   = '# <<< class-setup prompt <<<'
+    $blockPattern = '(?s)(\r?\n)?' + [regex]::Escape($blockBegin) + '.*?' + [regex]::Escape($blockEnd) + '(\r?\n)?'
+
+    # 候補: $HOME 直書き + OneDrive 各変数
+    $candidates = @(Join-Path $HOME $profileRel)
+    foreach ($name in 'OneDrive', 'OneDriveConsumer', 'OneDriveCommercial') {
+        $base = [Environment]::GetEnvironmentVariable($name)
+        if ($base) { $candidates += Join-Path $base $profileRel }
+    }
+    $candidates = $candidates | Select-Object -Unique |
+        Where-Object { -not [string]::Equals($_, $CorrectPath, [StringComparison]::OrdinalIgnoreCase) } |
+        Where-Object { Test-Path $_ }
+
+    foreach ($legacy in $candidates) {
+        try {
+            $raw = [System.IO.File]::ReadAllText($legacy, [System.Text.Encoding]::UTF8)
+        } catch { continue }
+        if ($raw -notmatch [regex]::Escape($blockBegin)) { continue }
+        $cleaned = [regex]::Replace($raw, $blockPattern, '')
+        if ($cleaned.Trim() -eq '') {
+            Remove-Item $legacy -Force -ErrorAction SilentlyContinue
+        } else {
+            [System.IO.File]::WriteAllText($legacy, $cleaned, $script:Utf8NoBom)
+        }
+        Write-Host "  旧パスの prompt block を除去: $legacy" -ForegroundColor DarkGray
+    }
+}
+
 function Install-WingetPackage {
     # --scope user を先に試して UAC を回避。失敗時のみ system-wide にフォールバック。
     param(
@@ -131,9 +183,7 @@ function Set-FileBlock {
     # pwsh 7 profile を BOM 付きで書きたくないので [System.IO.File] 経由で BOM 無し固定。
     param([string]$Path, [string]$Begin, [string]$End, [string]$Body)
     $dir = Split-Path $Path
-    if ($dir -and -not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
+    if ($dir) { [void][System.IO.Directory]::CreateDirectory($dir) }
     $new = "$Begin`r`n$Body`r`n$End"
     if (-not (Test-Path $Path)) {
         [System.IO.File]::WriteAllText($Path, $new + "`r`n", $script:Utf8NoBom)
@@ -157,9 +207,7 @@ function Set-VSCodeDefaultTerminal {
     $key = 'terminal.integrated.defaultProfile.windows'
     $value = 'PowerShell'   # VS Code 規約: "PowerShell" = pwsh 7
 
-    if (-not (Test-Path $userDir)) {
-        New-Item -ItemType Directory -Path $userDir -Force | Out-Null
-    }
+    [void][System.IO.Directory]::CreateDirectory($userDir)
 
     if (-not (Test-Path $settingsPath)) {
         $content = "{`r`n    `"$key`": `"$value`"`r`n}`r`n"
@@ -274,11 +322,33 @@ if ((Test-CommandPresent 'uv') -or (Test-WingetInstalled 'astral-sh.uv')) {
     Add-RequiredSkipped 'uv'
 }
 
+# --- 6. ~/.local/bin を PATH に追加 ---
+Show-LabelRequired "~/.local/bin を PATH に追加 (uv tool install 先)"
+$localBin = Join-Path $HOME '.local\bin'
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+# 現在のセッション PATH またはユーザー環境変数に含まれているか確認
+$inCurrentPath = ($Env:Path -split ';' | Where-Object { $_ -eq $localBin }).Count -gt 0
+$inUserPath    = $userPath -and ($userPath -split ';' | Where-Object { $_ -eq $localBin }).Count -gt 0
+if ($inCurrentPath -or $inUserPath) {
+    Show-AlreadyPresent
+} elseif (Read-YesNo) {
+    if ($userPath) {
+        [Environment]::SetEnvironmentVariable('Path', "$localBin;$userPath", 'User')
+    } else {
+        [Environment]::SetEnvironmentVariable('Path', $localBin, 'User')
+    }
+    $Env:Path = "$localBin;$Env:Path"
+    Write-Host "  設定しました: $localBin をユーザー PATH に追加" -ForegroundColor Green
+    Write-Host "  (新規プロセスから有効。現在のセッションにも一時反映済み)" -ForegroundColor DarkGray
+} else {
+    Add-RequiredSkipped '~/.local/bin PATH'
+}
+
 # ============================================================
 # [任意] 群
 # ============================================================
 
-# --- 6. GitHub Desktop ---
+# --- 7. GitHub Desktop ---
 Show-LabelOptional "GitHub Desktop" "git CLI / VS Code Source Control パネルのみで Git 操作"
 if ((Test-Path (Join-Path $Env:LOCALAPPDATA 'GitHubDesktop\GitHubDesktop.exe')) -or `
     (Test-WingetInstalled 'GitHub.GitHubDesktop')) {
@@ -289,7 +359,7 @@ if ((Test-Path (Join-Path $Env:LOCALAPPDATA 'GitHubDesktop\GitHubDesktop.exe')) 
     Add-OptionalSkipped 'GitHub Desktop'
 }
 
-# --- 7. PYTHONUTF8 = 1 (User) ---
+# --- 8. PYTHONUTF8 = 1 (User) ---
 Show-LabelOptional "Python の UTF-8 設定 (PYTHONUTF8=1)" `
     "Python I/O が cp932 既定 / cross-platform で文字化けリスク"
 if ([Environment]::GetEnvironmentVariable('PYTHONUTF8','User') -eq '1') {
@@ -302,7 +372,7 @@ if ([Environment]::GetEnvironmentVariable('PYTHONUTF8','User') -eq '1') {
     Add-OptionalSkipped 'PYTHONUTF8'
 }
 
-# --- 8. プロンプトのカスタマイズ (pwsh 7 profile) ---
+# --- 9. プロンプトのカスタマイズ (pwsh 7 profile) ---
 Show-LabelOptional "プロンプトのカスタマイズ (pwsh 7 profile に短プロンプトを1ブロック追記)" `
     "既定のプロンプトのまま"
 
@@ -324,6 +394,11 @@ function Get-PromptState {
 # OneDrive がドキュメントをリダイレクトしていると $HOME\Documents は実際の場所ではない。
 # GetFolderPath('MyDocuments') はリダイレクト後の実パスを返し、pwsh 7 の $PROFILE と一致する。
 $pwsh7Profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Microsoft.PowerShell_profile.ps1'
+
+# 旧 setup.ps1 の不具合修復: 間違ったパスに残った prompt block を除去し、BOM を剥がす。
+Remove-StalePromptBlocks -CorrectPath $pwsh7Profile
+Remove-Bom $pwsh7Profile
+
 switch (Get-PromptState $pwsh7Profile) {
     'ours' {
         Show-AlreadyPresent
@@ -355,9 +430,10 @@ function prompt {
     }
 }
 
-# --- 9. VS Code 既定ターミナル = pwsh 7 ---
+# --- 10. VS Code 既定ターミナル = pwsh 7 ---
 Show-LabelOptional "VS Code の既定ターミナルを pwsh 7 に" "VS Code ターミナルを毎回明示選択"
 $vscodeSettings = Join-Path $Env:APPDATA 'Code\User\settings.json'
+Remove-Bom $vscodeSettings
 $alreadyVS = (Test-Path $vscodeSettings) -and `
              ([System.IO.File]::ReadAllText($vscodeSettings, [System.Text.Encoding]::UTF8) -match '"terminal\.integrated\.defaultProfile\.windows"\s*:\s*"PowerShell"')
 if ($alreadyVS) {
