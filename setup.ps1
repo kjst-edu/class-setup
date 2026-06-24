@@ -183,7 +183,9 @@ function Set-FileBlock {
     # pwsh 7 profile を BOM 付きで書きたくないので [System.IO.File] 経由で BOM 無し固定。
     param([string]$Path, [string]$Begin, [string]$End, [string]$Body)
     $dir = Split-Path $Path
-    if ($dir) { [void][System.IO.Directory]::CreateDirectory($dir) }
+    if ($dir -and -not (Test-Path $dir)) {
+        $null = New-Item -ItemType Directory -Path $dir -Force
+    }
     $new = "$Begin`r`n$Body`r`n$End"
     if (-not (Test-Path $Path)) {
         [System.IO.File]::WriteAllText($Path, $new + "`r`n", $script:Utf8NoBom)
