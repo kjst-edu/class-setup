@@ -122,7 +122,10 @@ function Get-PromptState {
 }
 
 # OneDrive リダイレクトを考慮し、pwsh 7 が実際に読む $PROFILE と同じ場所を見る。
-$pwsh7Profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Microsoft.PowerShell_profile.ps1'
+# 空が返るケース (OneDrive 未ログイン等) に備え $HOME\Documents をフォールバック。
+$myDocs = [Environment]::GetFolderPath('MyDocuments')
+if (-not $myDocs) { $myDocs = Join-Path $HOME 'Documents' }
+$pwsh7Profile = Join-Path $myDocs 'PowerShell\Microsoft.PowerShell_profile.ps1'
 $promptName = 'プロンプトのカスタマイズ (pwsh 7 profile)'
 switch (Get-PromptState $pwsh7Profile) {
     'ours' {

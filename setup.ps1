@@ -393,7 +393,10 @@ function Get-PromptState {
 
 # OneDrive がドキュメントをリダイレクトしていると $HOME\Documents は実際の場所ではない。
 # GetFolderPath('MyDocuments') はリダイレクト後の実パスを返し、pwsh 7 の $PROFILE と一致する。
-$pwsh7Profile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Microsoft.PowerShell_profile.ps1'
+# 空が返るケース (OneDrive 未ログイン等) に備え $HOME\Documents をフォールバック。
+$myDocs = [Environment]::GetFolderPath('MyDocuments')
+if (-not $myDocs) { $myDocs = Join-Path $HOME 'Documents' }
+$pwsh7Profile = Join-Path $myDocs 'PowerShell\Microsoft.PowerShell_profile.ps1'
 
 # 旧 setup.ps1 の不具合修復: 間違ったパスに残った prompt block を除去し、BOM を剥がす。
 Remove-StalePromptBlocks -CorrectPath $pwsh7Profile
@@ -419,11 +422,18 @@ function prompt {
     "$leaf$tail > "
 }
 '@
-            Set-FileBlock -Path $pwsh7Profile `
-                         -Begin '# >>> class-setup prompt >>>' `
-                         -End   '# <<< class-setup prompt <<<' `
-                         -Body  $promptBody
-            Write-Host "  追記しました (新規 pwsh セッションで反映)" -ForegroundColor Green
+            try {
+                Set-FileBlock -Path $pwsh7Profile `
+                             -Begin '# >>> class-setup prompt >>>' `
+                             -End   '# <<< class-setup prompt <<<' `
+                             -Body  $promptBody
+                Write-Host "  追記しました (新規 pwsh セッションで反映)" -ForegroundColor Green
+            } catch {
+                Write-Warning "プロファイルの書込みに失敗: $_"
+                Write-Warning "対象パス: $pwsh7Profile"
+                Write-Warning "OneDrive のセットアップ状態やドキュメントフォルダの設定を確認してください。"
+                [void]$script:OptionalSkipped.Add('プロンプトのカスタマイズ (書込み失敗)')
+            }
         } else {
             Add-OptionalSkipped 'プロンプトのカスタマイズ'
         }
